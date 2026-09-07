@@ -3,3 +3,6 @@
 *.pdb
 .DS_Store
 /dist
+
+# release tooling (semantic-release)
+node_modules/

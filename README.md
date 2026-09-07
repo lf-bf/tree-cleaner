@@ -24,17 +24,31 @@ environments, Cargo targets, caches).
 
 ## Install
 
-```bash
-# from the repository
-cargo install --path .
+### Homebrew (macOS and Linux)
 
-# Homebrew (tap from the repository; a tagged release makes it a normal bottle later)
-brew tap lf-bf/tree-cleaner git@github.com:lf-bf/tree-cleaner.git
-brew install --HEAD lf-bf/tree-cleaner/tree-cleaner
+The repository is private, so the tap is added by URL and the formula builds the tagged
+release from source over SSH (your GitHub SSH key must work):
+
+```bash
+brew tap lf-bf/tree-cleaner ssh://git@github.com/lf-bf/tree-cleaner.git
+brew install lf-bf/tree-cleaner/tree-cleaner
+```
+
+Later releases arrive with the usual `brew update && brew upgrade tree-cleaner`; the
+formula's `tag`/`version` are bumped automatically by every release (see
+[Releases](#releases)). `brew install --HEAD lf-bf/tree-cleaner/tree-cleaner` builds the
+tip of `main` instead.
+
+### Cargo
+
+```bash
+cargo install --path .
 ```
 
 Requires Rust 1.85 or newer to build. Runs on macOS and Linux, in any terminal
-(truecolor when available, 16 colours otherwise, `NO_COLOR` respected).
+(truecolor when available, 16 colours otherwise, `NO_COLOR` respected). Prebuilt binaries
+for macOS (Apple silicon and Intel) and Linux x86_64 are attached to every
+[GitHub release](https://github.com/lf-bf/tree-cleaner/releases).
 
 ## Use
 
@@ -158,11 +172,36 @@ src/
 
 ```bash
 cargo build --release
-cargo clippy --all-targets
+cargo clippy --all-targets -- -D warnings
 ./target/release/tree-cleaner measure ~/Downloads --json
 ```
 
 `tree-cleaner measure` is the fastest way to validate the engine against `du -sk`.
+
+## Releases
+
+Versioning is automatic ([semantic-release](https://semantic-release.gitbook.io/), config in
+`.releaserc.json`). Every push to `main` runs the checks and then decides from the
+[Conventional Commits](https://www.conventionalcommits.org/) since the last tag whether to
+release:
+
+| Commit | Release |
+| --- | --- |
+| `fix: …`, `perf: …`, `revert: …` | patch (0.2.0 → 0.2.1) |
+| `feat: …` | minor (0.2.0 → 0.3.0) |
+| `feat!: …` or a `BREAKING CHANGE:` footer | major (0.2.0 → 1.0.0) |
+| `docs:`, `refactor:`, `chore:`, `ci:`, `build:`, `style:`, `test:` | none |
+
+A release bumps `Cargo.toml` and `Cargo.lock`, writes `CHANGELOG.md`, points the Homebrew
+formula at the new tag, commits all of that as `chore(release): vX.Y.Z [skip ci]`, tags
+`vX.Y.Z`, publishes the GitHub release with notes, and attaches prebuilt binaries
+(`scripts/release/*.sh` are the hooks; `.github/workflows/ci.yml` is the pipeline). Squash
+merges keep the PR title, so title pull requests with the same prefixes. Never edit the
+version by hand.
+
+To make the tap installable without SSH access (a public tap with bottles or binary
+formulae), the release job would need a token able to push to a public `homebrew-tap`
+repository; the pieces (tarballs and `.sha256` files per target) are already produced.
 
 ## License
 

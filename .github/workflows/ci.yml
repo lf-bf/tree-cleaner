@@ -3,12 +3,21 @@ name: ci
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
+
+# One run at a time per ref, so two pushes to main can never release concurrently.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   check:
+    name: check (${{ matrix.os }})
     strategy:
+      fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
@@ -19,34 +28,86 @@ jobs:
           components: clippy, rustfmt
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo build --release
+      - run: cargo build --release --locked
       - run: ./target/release/tree-cleaner --version
 
+  # Semantic release: reads the Conventional Commits since the last tag, decides the next
+  # version (feat → minor, fix/perf → patch, "!" or BREAKING CHANGE → major), updates
+  # Cargo.toml, Cargo.lock, CHANGELOG.md and the Homebrew formula, commits with [skip ci],
+  # tags vX.Y.Z and opens the GitHub release. Nothing happens when no relevant commit landed.
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    name: semantic release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      released: ${{ steps.semantic.outputs.released }}
+      version: ${{ steps.semantic.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - id: semantic
+        run: npx semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+
+  # Prebuilt binaries attached to the release that semantic release just created.
+  binaries:
+    name: binaries (${{ matrix.os }})
+    needs: release
+    if: needs.release.outputs.released == 'true'
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: macos-latest
-            target: aarch64-apple-darwin
-          - os: macos-13
-            target: x86_64-apple-darwin
+            targets: aarch64-apple-darwin,x86_64-apple-darwin
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
+            targets: x86_64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.version }}
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
-      - run: cargo build --release --target ${{ matrix.target }}
-      - run: |
-          cd target/${{ matrix.target }}/release
-          tar -czf tree-cleaner-${{ github.ref_name }}-${{ matrix.target }}.tar.gz tree-cleaner
-          shasum -a 256 tree-cleaner-${{ github.ref_name }}-${{ matrix.target }}.tar.gz > tree-cleaner-${{ github.ref_name }}-${{ matrix.target }}.tar.gz.sha256
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            target/${{ matrix.target }}/release/tree-cleaner-*.tar.gz
-            target/${{ matrix.target }}/release/tree-cleaner-*.sha256
+          targets: ${{ matrix.targets }}
+      - name: Build and package every target
+        shell: bash
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          TARGETS: ${{ matrix.targets }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          IFS=',' read -ra targets <<< "$TARGETS"
+          for target in "${targets[@]}"; do
+            cargo build --release --locked --target "$target"
+            name="tree-cleaner-v${VERSION}-${target}"
+            tar -C "target/${target}/release" -czf "dist/${name}.tar.gz" tree-cleaner
+            (cd dist && shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256")
+          done
+          ls -l dist
+      - name: Attach to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.release.outputs.version }}
+        run: gh release upload "v${VERSION}" dist/* --clobber
