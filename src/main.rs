@@ -26,7 +26,6 @@ use tree_cleaner::infrastructure::shell::{StdCommandRunner, SystemFileRevealer};
 use tree_cleaner::presentation::app::{App, Services};
 use tree_cleaner::presentation::headless::{MeasureOptions, run_measure};
 use tree_cleaner::presentation::terminal::TerminalSession;
-use tree_cleaner::presentation::theme::Theme;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -218,10 +217,9 @@ fn run_interface(cli: Cli, mut config: AppConfig, store: TomlConfigStore) -> Res
         home,
     };
 
-    let theme =
-        if cli.basic_colors || !supports_truecolor() { Theme::basic() } else { Theme::default_dark() };
+    let truecolor = !cli.basic_colors && supports_truecolor();
 
-    let mut app = App::new(services, config, theme, cli.path);
+    let mut app = App::new(services, config, truecolor, cli.path);
     let mut session = TerminalSession::open().context("opening the terminal")?;
     let result = app.run(&mut session);
     drop(session);

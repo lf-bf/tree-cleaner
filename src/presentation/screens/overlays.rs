@@ -62,6 +62,15 @@ const KEY_REFERENCE: &[(&str, &[(&str, &str)])] = &[
             ("r", "search again"),
         ],
     ),
+    (
+        "Settings (5)",
+        &[
+            ("←→ ⏎ space", "change the value (applies at once)"),
+            ("s", "save to the config file"),
+            ("e", "edit the config file in $EDITOR"),
+            ("R", "reset to defaults"),
+        ],
+    ),
 ];
 
 impl App {
@@ -141,6 +150,7 @@ impl App {
         let mut right: Vec<Line<'static>> = Vec::new();
         for (index, (group, bindings)) in KEY_REFERENCE.iter().enumerate() {
             let column = if index < 2 { &mut left } else { &mut right };
+            let _ = index;
             column.push(Line::from(Span::styled((*group).to_owned(), theme.title())));
             for (key, description) in *bindings {
                 column.push(Line::from(vec![

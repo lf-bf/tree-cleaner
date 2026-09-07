@@ -1,5 +1,5 @@
 //! Owns the terminal for the lifetime of the interface, and hands it back temporarily when
-//! another program (sudo) needs it.
+//! another program (sudo, an editor) needs it.
 
 use std::io;
 
@@ -20,15 +20,24 @@ impl TerminalSession {
         &mut self.terminal
     }
 
-    /// Leaves the alternate screen and raw mode, runs `action`, then takes the terminal
-    /// back and forces a full redraw.
+    /// Leaves the alternate screen and raw mode, runs `action`, waits for Enter, then takes
+    /// the terminal back and forces a full redraw.
     pub fn suspend<R>(&mut self, action: impl FnOnce() -> R) -> io::Result<R> {
+        self.suspend_with_pause(true, action)
+    }
+
+    /// Like [`Self::suspend`]; `pause` controls whether the user is asked to press Enter
+    /// before the interface comes back (skip it for programs with their own screen, such as
+    /// an editor).
+    pub fn suspend_with_pause<R>(&mut self, pause: bool, action: impl FnOnce() -> R) -> io::Result<R> {
         ratatui::restore();
         let result = action();
-        println!();
-        println!("  Press Enter to return to tree-cleaner…");
-        let mut line = String::new();
-        let _ = io::stdin().read_line(&mut line);
+        if pause {
+            println!();
+            println!("  Press Enter to return to tree-cleaner…");
+            let mut line = String::new();
+            let _ = io::stdin().read_line(&mut line);
+        }
         self.terminal = ratatui::try_init()?;
         self.terminal.clear()?;
         Ok(result)

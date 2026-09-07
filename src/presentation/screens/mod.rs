@@ -6,6 +6,7 @@ mod explorer;
 mod heaviest;
 mod operation;
 mod overlays;
+mod settings;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -42,6 +43,7 @@ impl App {
             Screen::Explorer => self.render_explorer(frame, content_area),
             Screen::Heaviest => self.render_heaviest(frame, content_area),
             Screen::Cleaner => self.render_cleaner(frame, content_area),
+            Screen::Settings => self.render_settings(frame, content_area),
         }
         self.render_footer(frame, footer_area);
         if let Some(overlay) = self.overlay.clone() {
@@ -200,6 +202,15 @@ impl App {
                 ("i", "info"),
                 ("o", "reveal"),
                 ("r", "rescan"),
+                ("esc", "back"),
+            ],
+            Screen::Settings => &[
+                ("↑↓", "select"),
+                ("←→ ⏎", "change"),
+                ("s", "save"),
+                ("e", "edit file"),
+                ("R", "reset defaults"),
+                (":theme", "palette"),
                 ("esc", "back"),
             ],
         };

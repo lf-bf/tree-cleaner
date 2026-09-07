@@ -15,6 +15,59 @@ pub struct AppConfig {
     pub view: ViewConfig,
     pub deletion: DeletionConfig,
     pub cleaner: CleanerConfig,
+    /// Colour overrides applied on top of the chosen theme. Omitted when empty.
+    #[serde(skip_serializing_if = "ThemeConfig::is_empty")]
+    pub theme: ThemeConfig,
+}
+
+/// Optional colour overrides. Each value is `#rrggbb`, `#rgb`, an ANSI name (`red`,
+/// `light_blue`, `dark_gray`, ...) or a 0-255 palette index.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ThemeConfig {
+    pub accent: Option<String>,
+    pub accent_soft: Option<String>,
+    pub directory: Option<String>,
+    pub file: Option<String>,
+    pub text: Option<String>,
+    pub muted: Option<String>,
+    pub faint: Option<String>,
+    pub success: Option<String>,
+    pub warning: Option<String>,
+    pub danger: Option<String>,
+    pub border: Option<String>,
+    pub border_focused: Option<String>,
+    pub selection_background: Option<String>,
+    pub bar_track: Option<String>,
+}
+
+impl ThemeConfig {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// `(field name, value)` for every override that is set.
+    pub fn entries(&self) -> Vec<(&'static str, &str)> {
+        [
+            ("accent", &self.accent),
+            ("accent_soft", &self.accent_soft),
+            ("directory", &self.directory),
+            ("file", &self.file),
+            ("text", &self.text),
+            ("muted", &self.muted),
+            ("faint", &self.faint),
+            ("success", &self.success),
+            ("warning", &self.warning),
+            ("danger", &self.danger),
+            ("border", &self.border),
+            ("border_focused", &self.border_focused),
+            ("selection_background", &self.selection_background),
+            ("bar_track", &self.bar_track),
+        ]
+        .into_iter()
+        .filter_map(|(name, value)| value.as_deref().map(|value| (name, value)))
+        .collect()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -65,6 +118,11 @@ pub struct ViewConfig {
     pub size_base: String,
     /// Target frame time in milliseconds.
     pub frame_interval_ms: u64,
+    /// Built-in palette: claude, btop, nord, dracula, gruvbox, catppuccin, tokyo-night,
+    /// solarized, monochrome, light or basic. `[theme]` overrides individual colours.
+    pub theme: String,
+    /// Whether the explorer lists files next to directories.
+    pub show_files: bool,
 }
 
 impl Default for ViewConfig {
@@ -75,6 +133,8 @@ impl Default for ViewConfig {
             size_mode: "allocated".to_owned(),
             size_base: "decimal".to_owned(),
             frame_interval_ms: 33,
+            theme: "claude".to_owned(),
+            show_files: true,
         }
     }
 }

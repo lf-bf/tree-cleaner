@@ -302,6 +302,13 @@ impl CleaningService {
         }
     }
 
+    /// Replaces the configuration; takes effect the next time candidates are collected.
+    pub fn set_config(&mut self, config: AppConfig) -> Result<(), crate::domain::cleaning::InvalidPattern> {
+        self.protection = config.protection_rules(self.home.as_deref())?;
+        self.config = config;
+        Ok(())
+    }
+
     pub fn executor(&self) -> CleaningExecutor {
         self.executor.clone()
     }

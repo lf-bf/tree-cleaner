@@ -17,6 +17,9 @@ heaviest_files_limit = 100         # T view
 size_mode = "allocated"            # or "apparent"
 size_base = "decimal"              # GB like Finder, or "binary" for GiB
 frame_interval_ms = 33
+theme = "claude"                   # claude, btop, nord, dracula, gruvbox, catppuccin, tokyo-night,
+                                   # solarized, monochrome, light, basic (key 5 or :theme to switch)
+show_files = true                  # list files next to directories in the explorer
 
 [deletion]
 default_mode = "permanent"         # or "trash"
@@ -36,3 +39,10 @@ protected_images = ["postgres:*", "ghcr.io/my-org/*"]   # globs on repo:tag, rep
 prune_containers = true
 prune_volumes = false
 prune_build_cache = true
+
+# Optional colour overrides on top of the theme. #rrggbb, #rgb, ANSI names or 0-255.
+# Keys: accent, accent_soft, directory, file, text, muted, faint, success, warning, danger,
+#       border, border_focused, selection_background, bar_track
+# [theme]
+# accent = "#d08770"
+# directory = "#81a1c1"
