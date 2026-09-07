@@ -48,6 +48,15 @@ pub struct ContainerDiskUsage {
     pub build_cache_reclaimable: ByteSize,
 }
 
+/// Result of an action that frees space inside the engine.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EngineActionOutcome {
+    /// One line worth showing to the user.
+    pub summary: String,
+    /// Bytes the engine reported as reclaimed, when it said.
+    pub reclaimed: Option<ByteSize>,
+}
+
 pub trait ContainerEngine: Send + Sync {
     /// `Ok(version)` when the daemon answers.
     fn availability(&self) -> Result<String, ContainerEngineError>;
@@ -59,7 +68,7 @@ pub trait ContainerEngine: Send + Sync {
 
     fn disk_usage(&self) -> Result<ContainerDiskUsage, ContainerEngineError>;
 
-    fn remove_images(&self, ids: &[String]) -> Result<String, ContainerEngineError>;
+    fn remove_images(&self, ids: &[String]) -> Result<EngineActionOutcome, ContainerEngineError>;
 
-    fn prune(&self, kind: DockerPruneKind) -> Result<String, ContainerEngineError>;
+    fn prune(&self, kind: DockerPruneKind) -> Result<EngineActionOutcome, ContainerEngineError>;
 }

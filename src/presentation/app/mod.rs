@@ -7,6 +7,7 @@ pub mod dialogs;
 pub mod explorer_state;
 pub mod heaviest_state;
 pub mod marks;
+pub mod operation;
 pub mod rows;
 
 use std::path::{Path, PathBuf};
@@ -14,7 +15,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossbeam_channel::Receiver;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use self::cleaner_state::{CleanerRow, CleanerState};
@@ -25,14 +25,13 @@ use self::dialogs::{
 use self::explorer_state::{ExplorerState, RowBadge, RowKey};
 use self::heaviest_state::HeaviestState;
 use self::marks::{MarkedItem, Marks};
+use self::operation::{OperationKind, OperationReport, OperationRun, OperationSource};
 use crate::application::cleaning::CleaningService;
 use crate::application::configuration::AppConfig;
-use crate::application::deletion::{DeletionProgress, DeletionService};
+use crate::application::deletion::DeletionService;
 use crate::application::scanning::TreeCoordinator;
-use crate::domain::cleaning::{CleaningReport, CleaningStatus};
-use crate::domain::deletion::{
-    DeletionItem, DeletionMode, DeletionOutcome, DeletionPlan, DeletionReport, DeletionStatus,
-};
+use crate::domain::cleaning::{CleaningPlan, CleaningReport, CleaningStatus};
+use crate::domain::deletion::{DeletionItem, DeletionMode, DeletionPlan, DeletionReport, DeletionStatus};
 use crate::domain::ports::{FileRevealer, PrivilegeEscalator, VolumeProvider};
 use crate::domain::storage::{ByteSize, MeasuredSize, NodeId, RootPurpose, SizeBase};
 use crate::infrastructure::config::TomlConfigStore;
@@ -94,12 +93,6 @@ pub struct Services {
     pub home: Option<PathBuf>,
 }
 
-pub struct DeletionRun {
-    receiver: Receiver<DeletionProgress>,
-    pub total: usize,
-    pub finished: Vec<DeletionOutcome>,
-}
-
 pub struct App {
     pub services: Services,
     pub config: AppConfig,
@@ -115,8 +108,9 @@ pub struct App {
     pub heaviest: HeaviestState,
     pub cleaner: CleanerState,
     pub marks: Marks,
-    pub deletion_run: Option<DeletionRun>,
-    pub cleaning_run: Option<Receiver<CleaningReport>>,
+    /// A deletion or cleaning run being followed in the progress modal. While it is set,
+    /// every key except Ctrl+C goes to the modal, so nothing can race with the run.
+    pub operation: Option<OperationRun>,
     pub pending_elevation: Option<PendingAction>,
     pub status: Option<StatusMessage>,
     pub tick: usize,
@@ -146,8 +140,7 @@ impl App {
             heaviest: HeaviestState::new(heaviest_limit),
             cleaner: CleanerState::default(),
             marks: Marks::default(),
-            deletion_run: None,
-            cleaning_run: None,
+            operation: None,
             pending_elevation: None,
             status: None,
             tick: 0,
@@ -224,8 +217,7 @@ impl App {
         if cleaning.has_started() {
             cleaning.update(coordinator, coordinator.size_mode());
         }
-        self.poll_deletion_run();
-        self.poll_cleaning_run();
+        self.poll_operation();
         if self.status.as_ref().is_some_and(StatusMessage::is_expired) {
             self.status = None;
         }
@@ -248,6 +240,10 @@ impl App {
     fn handle_key(&mut self, key: KeyEvent) {
         if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('c')) {
             self.should_quit = true;
+            return;
+        }
+        if self.operation.is_some() {
+            self.handle_operation_key(key);
             return;
         }
         if self.overlay.is_some() {
@@ -788,7 +784,7 @@ impl App {
     }
 
     fn request_deletion(&mut self) {
-        if self.deletion_run.is_some() {
+        if self.operation.is_some() {
             self.show_status("a deletion is already running", Severity::Warning);
             return;
         }
@@ -862,7 +858,7 @@ impl App {
     }
 
     fn request_cleaning(&mut self) {
-        if self.cleaning_run.is_some() {
+        if self.operation.is_some() {
             self.show_status("a cleaning run is already in progress", Severity::Warning);
             return;
         }
@@ -924,37 +920,93 @@ impl App {
 
     fn start_deletion(&mut self, plan: DeletionPlan) {
         let total = plan.len();
-        let receiver = self.services.deletion.execute_in_background(plan);
-        self.deletion_run = Some(DeletionRun { receiver, total, finished: Vec::new() });
-        self.show_status(format!("deleting {total} items…"), Severity::Info);
+        let handle = self.services.deletion.execute_in_background(plan);
+        self.operation = Some(OperationRun::new(
+            OperationKind::Deletion,
+            OperationSource::Deletion(handle),
+            total,
+            self.services.home.clone(),
+        ));
+        log::info!("deleting {total} items");
     }
 
-    fn poll_deletion_run(&mut self) {
-        let Some(run) = &mut self.deletion_run else {
-            return;
+    fn start_cleaning(&mut self, plan: CleaningPlan) {
+        let total = plan.len();
+        let handle = self.services.cleaning.executor().execute_in_background(plan);
+        self.operation = Some(OperationRun::new(
+            OperationKind::Cleaning,
+            OperationSource::Cleaning(handle),
+            total,
+            self.services.home.clone(),
+        ));
+        self.cleaner.running = true;
+        log::info!("cleaning {total} targets");
+    }
+
+    /// Feeds the progress modal. The tree is corrected the moment the run finishes, while
+    /// input is still locked, so nothing can race with the update.
+    fn poll_operation(&mut self) {
+        let report = match &mut self.operation {
+            Some(run) => run.drain(),
+            None => return,
         };
-        let mut finished_report: Option<DeletionReport> = None;
-        while let Ok(progress) = run.receiver.try_recv() {
-            match progress {
-                DeletionProgress::Started { .. } => {}
-                DeletionProgress::ItemFinished(outcome) => run.finished.push(outcome),
-                DeletionProgress::Finished(report) => finished_report = Some(report),
+        match report {
+            Some(OperationReport::Deletion(report)) => self.absorb_deletion_report(&report),
+            Some(OperationReport::Cleaning(report)) => self.absorb_cleaning_report(&report),
+            None => {}
+        }
+    }
+
+    /// While a run is active every key is swallowed: Esc asks for a cancellation between
+    /// items, and once the run finished any key closes the modal. Ctrl+C is handled before
+    /// this and still aborts the program.
+    fn handle_operation_key(&mut self, key: KeyEvent) {
+        let finished = self.operation.as_ref().is_some_and(OperationRun::is_finished);
+        if finished {
+            self.dismiss_operation();
+            return;
+        }
+        if key.code == KeyCode::Esc {
+            if let Some(run) = &mut self.operation {
+                run.request_cancel();
+                log::info!("cancellation requested");
             }
         }
-        if let Some(report) = finished_report {
-            self.deletion_run = None;
-            self.finish_deletion(report);
+    }
+
+    fn dismiss_operation(&mut self) {
+        let Some(run) = self.operation.take() else {
+            return;
+        };
+        self.cleaner.running = false;
+        match run.report {
+            Some(OperationReport::Deletion(report)) => self.follow_up_deletion(report),
+            Some(OperationReport::Cleaning(report)) => self.follow_up_cleaning(report),
+            None => {}
         }
     }
 
-    fn finish_deletion(&mut self, report: DeletionReport) {
-        for outcome in report.succeeded() {
-            self.absorb_removed_item(&outcome.item);
+    /// Reflects a finished deletion in the tree: removed items disappear, items that were
+    /// only partially removed are measured again.
+    fn absorb_deletion_report(&mut self, report: &DeletionReport) {
+        for outcome in &report.outcomes {
+            if outcome.status.is_success() {
+                self.absorb_removed_item(&outcome.item);
+            } else if outcome.is_partial() {
+                if let Some(node) = outcome.item.node {
+                    self.services.coordinator.rescan(node, false);
+                }
+            }
         }
+    }
+
+    /// Dialogs and status shown after the progress modal is closed.
+    fn follow_up_deletion(&mut self, report: DeletionReport) {
         let needing = report.needing_privileges();
         let failures = report.failures();
         let reclaimed = formatting::size(report.reclaimed(), self.size_base);
         let succeeded = report.succeeded().count();
+        let cancelled = report.cancelled_count();
         if !failures.is_empty() {
             let lines: Vec<String> = failures
                 .iter()
@@ -999,8 +1051,9 @@ impl App {
                 dangerous: true,
             }));
         }
+        let cancelled_note = if cancelled > 0 { format!(" · {cancelled} cancelled") } else { String::new() };
         self.show_status(
-            format!("{succeeded} items removed · {reclaimed} reclaimed"),
+            format!("{succeeded} items removed · {reclaimed} reclaimed{cancelled_note}"),
             if succeeded > 0 { Severity::Success } else { Severity::Warning },
         );
     }
@@ -1025,39 +1078,17 @@ impl App {
         }
     }
 
-    fn start_cleaning(&mut self, plan: crate::domain::cleaning::CleaningPlan) {
-        let executor = self.services.cleaning.executor();
-        let (sender, receiver) = crossbeam_channel::bounded(1);
-        std::thread::Builder::new()
-            .name("tree-cleaner-clean".to_owned())
-            .spawn(move || {
-                let report = executor.execute(&plan);
-                let _ = sender.send(report);
-            })
-            .expect("failed to spawn cleaning thread");
-        self.cleaning_run = Some(receiver);
-        self.cleaner.running = true;
-        self.show_status("cleaning…", Severity::Info);
-    }
-
-    fn poll_cleaning_run(&mut self) {
-        let Some(receiver) = &self.cleaning_run else {
-            return;
-        };
-        let Ok(report) = receiver.try_recv() else {
-            return;
-        };
-        self.cleaning_run = None;
-        self.cleaner.running = false;
-        self.finish_cleaning(report);
-    }
-
-    fn finish_cleaning(&mut self, report: CleaningReport) {
+    fn absorb_cleaning_report(&mut self, report: &CleaningReport) {
         let Services { coordinator, cleaning, .. } = &mut self.services;
-        cleaning.absorb_report(&report, coordinator);
+        cleaning.absorb_report(report, coordinator);
+    }
+
+    /// Dialogs and status shown after the progress modal is closed.
+    fn follow_up_cleaning(&mut self, report: CleaningReport) {
         let needing = report.needing_privileges();
         let cleaned = report.cleaned_count();
         let failed = report.failed_count();
+        let cancelled = report.cancelled_count();
         let reclaimed = formatting::size(report.reclaimed_estimate, self.size_base);
         if !needing.is_empty() {
             let (whole, contents) = self.services.cleaning.privileged_paths(&needing);
@@ -1094,11 +1125,15 @@ impl App {
             }));
         }
         self.cleaner.last_report = Some(report);
+        let mut notes = String::new();
+        if failed > 0 {
+            notes.push_str(&format!(" · {failed} failed"));
+        }
+        if cancelled > 0 {
+            notes.push_str(&format!(" · {cancelled} cancelled"));
+        }
         self.show_status(
-            format!(
-                "{cleaned} cleaned · about {reclaimed} reclaimed{}",
-                if failed > 0 { format!(" · {failed} failed") } else { String::new() }
-            ),
+            format!("{cleaned} cleaned · about {reclaimed} reclaimed{notes}"),
             if cleaned > 0 { Severity::Success } else { Severity::Warning },
         );
     }
@@ -1143,6 +1178,8 @@ impl App {
                                     label: String::new(),
                                     status: CleaningStatus::Cleaned,
                                     detail: String::new(),
+                                    reclaimed: ByteSize::ZERO,
+                                    entries_removed: 0,
                                 })
                                 .collect(),
                             reclaimed_estimate: ByteSize::ZERO,

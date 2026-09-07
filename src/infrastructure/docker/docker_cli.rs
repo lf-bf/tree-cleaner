@@ -4,7 +4,9 @@
 use std::process::Command;
 
 use crate::domain::cleaning::DockerPruneKind;
-use crate::domain::ports::{ContainerDiskUsage, ContainerEngine, ContainerEngineError, ContainerImage};
+use crate::domain::ports::{
+    ContainerDiskUsage, ContainerEngine, ContainerEngineError, ContainerImage, EngineActionOutcome,
+};
 use crate::domain::storage::ByteSize;
 use crate::infrastructure::privilege::find_in_path;
 
@@ -62,6 +64,21 @@ pub fn parse_docker_size(text: &str) -> ByteSize {
         _ => 1.0,
     };
     ByteSize::new((value * multiplier).round().max(0.0) as u64)
+}
+
+/// Docker ends prune output with `Total reclaimed space: 1.23GB`.
+fn parse_reclaimed(output: &str) -> Option<ByteSize> {
+    output
+        .lines()
+        .rev()
+        .find_map(|line| line.trim().strip_prefix("Total reclaimed space:"))
+        .map(|value| parse_docker_size(value.trim()))
+}
+
+fn action_outcome(output: String, fallback: &str) -> EngineActionOutcome {
+    let summary =
+        output.lines().rev().map(str::trim).find(|line| !line.is_empty()).unwrap_or(fallback).to_owned();
+    EngineActionOutcome { reclaimed: parse_reclaimed(&output), summary }
 }
 
 fn short_image_id(raw: &str) -> String {
@@ -148,20 +165,21 @@ impl ContainerEngine for DockerCli {
         Ok(usage)
     }
 
-    fn remove_images(&self, ids: &[String]) -> Result<String, ContainerEngineError> {
+    fn remove_images(&self, ids: &[String]) -> Result<EngineActionOutcome, ContainerEngineError> {
         if ids.is_empty() {
-            return Ok(String::new());
+            return Ok(EngineActionOutcome::default());
         }
         let mut arguments = vec!["image", "rm"];
         arguments.extend(ids.iter().map(String::as_str));
-        self.run(&arguments)
+        self.run(&arguments).map(|output| action_outcome(output, "image removed"))
     }
 
-    fn prune(&self, kind: DockerPruneKind) -> Result<String, ContainerEngineError> {
-        match kind {
+    fn prune(&self, kind: DockerPruneKind) -> Result<EngineActionOutcome, ContainerEngineError> {
+        let output = match kind {
             DockerPruneKind::StoppedContainers => self.run(&["container", "prune", "--force"]),
             DockerPruneKind::DanglingVolumes => self.run(&["volume", "prune", "--force"]),
             DockerPruneKind::BuildCache => self.run(&["builder", "prune", "--all", "--force"]),
-        }
+        }?;
+        Ok(action_outcome(output, kind.label()))
     }
 }

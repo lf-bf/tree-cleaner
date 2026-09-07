@@ -39,6 +39,7 @@ impl CleaningPlan {
 pub enum CleaningStatus {
     Cleaned,
     NeedsPrivileges,
+    Cancelled,
     Skipped(String),
     Failed(String),
 }
@@ -49,6 +50,10 @@ pub struct CleaningOutcome {
     pub label: String,
     pub status: CleaningStatus,
     pub detail: String,
+    /// Bytes freed by this candidate: measured while removing when possible, otherwise the
+    /// engine's own figure or the estimate.
+    pub reclaimed: ByteSize,
+    pub entries_removed: u64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -64,6 +69,10 @@ impl CleaningReport {
 
     pub fn failed_count(&self) -> usize {
         self.outcomes.iter().filter(|outcome| matches!(outcome.status, CleaningStatus::Failed(_))).count()
+    }
+
+    pub fn cancelled_count(&self) -> usize {
+        self.outcomes.iter().filter(|outcome| outcome.status == CleaningStatus::Cancelled).count()
     }
 
     pub fn needing_privileges(&self) -> Vec<CandidateId> {
