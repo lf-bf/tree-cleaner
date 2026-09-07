@@ -5,13 +5,14 @@
 #   brew upgrade tree-cleaner        # after `brew update`
 #
 # The repository is private, so the formula builds from the release tag over SSH instead of
-# downloading a tarball. `tag` and `version` are bumped by semantic-release on every release
-# (scripts/release/prepare.sh); do not edit them by hand.
+# downloading a tarball. Homebrew reads the version from the tag; `tag` is bumped by
+# semantic-release on every release (scripts/release/prepare.sh), do not edit it by hand.
+# `brew audit` asks for a `revision:` next to the tag; it cannot be known when the release
+# commit is prepared, and installs work without it.
 class TreeCleaner < Formula
   desc "Interactive terminal explorer and cleaner for disk usage"
   homepage "https://github.com/lf-bf/tree-cleaner"
-  url "ssh://git@github.com/lf-bf/tree-cleaner.git", using: :git, tag: "v0.2.0"
-  version "0.2.0"
+  url "ssh://git@github.com/lf-bf/tree-cleaner.git", tag: "v0.2.0"
   license "MIT"
   head "ssh://git@github.com/lf-bf/tree-cleaner.git", branch: "main"
 
