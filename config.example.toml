@@ -18,7 +18,7 @@ size_mode = "allocated"            # or "apparent"
 size_base = "decimal"              # GB like Finder, or "binary" for GiB
 frame_interval_ms = 33
 theme = "claude"                   # claude, btop, nord, dracula, gruvbox, catppuccin, tokyo-night,
-                                   # solarized, monochrome, light, basic (key 5 or :theme to switch)
+                                   # solarized, monochrome, light, basic (:settings or :theme to switch)
 show_files = true                  # list files next to directories in the explorer
 
 [deletion]

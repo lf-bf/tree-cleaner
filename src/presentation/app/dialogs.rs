@@ -72,6 +72,8 @@ pub struct MessageDialog {
 pub enum Overlay {
     Help,
     Log,
+    /// The preferences popup (`:settings`). Keeps focus until Esc.
+    Settings,
     Confirm(ConfirmDialog),
     Message(MessageDialog),
 }

@@ -38,7 +38,7 @@ impl App {
             DeveloperCommand::SaveConfig => self.save_settings(),
             DeveloperCommand::EditConfig => self.pending_foreground = Some(PendingAction::EditConfigFile),
             DeveloperCommand::ReloadConfig => self.reload_config_from_disk(),
-            DeveloperCommand::Settings => self.switch_screen(Screen::Settings),
+            DeveloperCommand::Settings => self.overlay = Some(Overlay::Settings),
             DeveloperCommand::Theme(None) => {
                 let mut lines = self.theme_listing();
                 lines.push(String::new());

@@ -230,7 +230,7 @@ pub const COMMAND_REFERENCE: &[(&str, &str)] = &[
     (":stats", "scanner statistics"),
     (":log", "show the log"),
     (":theme [name]", "list palettes / switch palette"),
-    (":settings", "preferences screen (also key 5)"),
+    (":settings", "preferences popup"),
     (":config [save|edit|reload]", "config file path / write / edit in $EDITOR / reload"),
     (":q", "quit"),
 ];

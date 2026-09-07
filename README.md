@@ -69,7 +69,6 @@ tree-cleaner config init        # write ~/.config/tree-cleaner/config.toml
 | `2` | Explorer | Children of the current directory, largest first, with share bars, item counts and state. |
 | `3` | Heaviest | The N largest files anywhere below the current directory (`T` starts it). |
 | `4` | Cleaner | Reclaimable space grouped by category, with checkboxes and protections. |
-| `5` | Settings | Every preference, editable live, with the theme picker; `s` writes the config file. |
 
 ### Explorer keys
 
@@ -146,18 +145,19 @@ in decimal units like Finder; `a` toggles apparent sizes, `:base binary` switche
 key is optional; see [`config.example.toml`](config.example.toml) for the full set with
 comments.
 
-The **Settings** screen (`5`, or `:settings`) edits everything live: theme, size mode and
-units, rows shown, scanner threads and thresholds, deletion mode, Docker options. Changes
-apply immediately; `s` writes them to the file (`:config save` does the same from any
-screen), `e` opens the file in `$VISUAL`/`$EDITOR` and reloads it, `R` resets to the
-defaults. Quitting with unsaved preference changes asks whether to save them.
+The **Settings** popup (`:settings`) edits everything live on top of the current screen:
+theme, size mode and units, rows shown, scanner threads and thresholds, deletion mode,
+Docker options. Changes apply immediately; `s` writes them to the file (`:config save` does
+the same from any screen), `e` opens the file in `$VISUAL`/`$EDITOR` and reloads it, `R`
+resets to the defaults, `Esc` closes. Quitting with unsaved preference changes asks whether
+to save them.
 
 ### Themes
 
 Eleven built-in palettes: `claude` (default), `btop`, `nord`, `dracula`, `gruvbox`,
 `catppuccin`, `tokyo-night`, `solarized`, `monochrome`, `light` (for light terminal
 backgrounds) and `basic` (16 ANSI colours, also forced automatically when the terminal has
-no truecolor). Switch with `←`/`→` on the Theme row of the Settings screen or with
+no truecolor). Switch with `←`/`→` on the Theme row of the Settings popup or with
 `:theme <name>`; `:theme` alone lists them.
 
 Any colour can be overridden in a `[theme]` table of the config file, on top of the chosen

@@ -63,7 +63,7 @@ const KEY_REFERENCE: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
-        "Settings (5)",
+        "Settings (:settings)",
         &[
             ("←→ ⏎ space", "change the value (applies at once)"),
             ("s", "save to the config file"),
@@ -78,6 +78,8 @@ impl App {
         let theme = self.theme;
         match overlay {
             Overlay::Help => self.render_help(frame),
+            // Rendered by `render_settings_overlay`, which needs mutable table state.
+            Overlay::Settings => {}
             Overlay::Log => {
                 let snapshot = LogBuffer::global().snapshot();
                 let max_lines = frame.area().height.saturating_sub(8) as usize;

@@ -5,7 +5,6 @@ use std::process::Command;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 use super::App;
-use super::Screen;
 use super::dialogs::{ConfirmDialog, Confirmation, MessageDialog, Overlay, PendingAction, Severity};
 use super::settings_state::SettingId;
 use crate::application::configuration::AppConfig;
@@ -73,7 +72,7 @@ impl App {
             KeyCode::Char('s') => self.save_settings(),
             KeyCode::Char('e') => self.run_setting_action(SettingId::EditConfig),
             KeyCode::Char('R') => self.run_setting_action(SettingId::ResetDefaults),
-            KeyCode::Esc => self.switch_screen(Screen::Explorer),
+            KeyCode::Esc | KeyCode::Char('q') => self.overlay = None,
             _ => {}
         }
     }

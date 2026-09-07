@@ -51,12 +51,10 @@ pub enum Screen {
     Explorer,
     Heaviest,
     Cleaner,
-    Settings,
 }
 
 impl Screen {
-    pub const ALL: [Self; 5] =
-        [Self::Dashboard, Self::Explorer, Self::Heaviest, Self::Cleaner, Self::Settings];
+    pub const ALL: [Self; 4] = [Self::Dashboard, Self::Explorer, Self::Heaviest, Self::Cleaner];
 
     pub const fn label(self) -> &'static str {
         match self {
@@ -64,7 +62,6 @@ impl Screen {
             Self::Explorer => "Explorer",
             Self::Heaviest => "Heaviest",
             Self::Cleaner => "Cleaner",
-            Self::Settings => "Settings",
         }
     }
 
@@ -73,18 +70,16 @@ impl Screen {
             Self::Dashboard => Self::Explorer,
             Self::Explorer => Self::Heaviest,
             Self::Heaviest => Self::Cleaner,
-            Self::Cleaner => Self::Settings,
-            Self::Settings => Self::Dashboard,
+            Self::Cleaner => Self::Dashboard,
         }
     }
 
     pub const fn previous(self) -> Self {
         match self {
-            Self::Dashboard => Self::Settings,
+            Self::Dashboard => Self::Cleaner,
             Self::Explorer => Self::Dashboard,
             Self::Heaviest => Self::Explorer,
             Self::Cleaner => Self::Heaviest,
-            Self::Settings => Self::Cleaner,
         }
     }
 }
@@ -254,7 +249,6 @@ impl App {
             Screen::Dashboard => self.rebuild_dashboard_rows(),
             Screen::Heaviest => self.rebuild_heaviest_rows(),
             Screen::Cleaner => self.rebuild_cleaner_rows(),
-            Screen::Settings => {}
         }
     }
 
@@ -269,6 +263,10 @@ impl App {
         }
         if self.operation.is_some() {
             self.handle_operation_key(key);
+            return;
+        }
+        if matches!(self.overlay, Some(Overlay::Settings)) {
+            self.handle_settings_key(key);
             return;
         }
         if self.overlay.is_some() {
@@ -292,18 +290,14 @@ impl App {
             KeyCode::Char('2') => self.switch_screen(Screen::Explorer),
             KeyCode::Char('3') => self.switch_screen(Screen::Heaviest),
             KeyCode::Char('4') => self.switch_screen(Screen::Cleaner),
-            KeyCode::Char('5') => self.switch_screen(Screen::Settings),
             KeyCode::Char('q') => self.request_quit(),
-            KeyCode::Char('p') if self.screen != Screen::Settings => self.toggle_background_pause(),
-            KeyCode::Char('a') if !matches!(self.screen, Screen::Cleaner | Screen::Settings) => {
-                self.toggle_size_mode()
-            }
+            KeyCode::Char('p') => self.toggle_background_pause(),
+            KeyCode::Char('a') if self.screen != Screen::Cleaner => self.toggle_size_mode(),
             _ => match self.screen {
                 Screen::Dashboard => self.handle_dashboard_key(key),
                 Screen::Explorer => self.handle_explorer_key(key),
                 Screen::Heaviest => self.handle_heaviest_key(key),
                 Screen::Cleaner => self.handle_cleaner_key(key),
-                Screen::Settings => self.handle_settings_key(key),
             },
         }
     }
@@ -313,6 +307,8 @@ impl App {
             return;
         };
         match overlay {
+            // Routed to `handle_settings_key` before we get here; keep it open regardless.
+            Overlay::Settings => self.overlay = Some(Overlay::Settings),
             Overlay::Help | Overlay::Log | Overlay::Message(_) => {
                 // Any key dismisses.
             }
