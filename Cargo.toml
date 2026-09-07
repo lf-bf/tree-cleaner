@@ -1,0 +1,44 @@
+[package]
+name = "tree-cleaner"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Interactive terminal disk-usage explorer and cleaner. Walks the filesystem like a tree, shows what weighs, and removes it."
+license = "MIT"
+repository = "https://github.com/lf-bf/tree-cleaner"
+readme = "README.md"
+keywords = ["disk-usage", "tui", "cleaner", "du", "ncdu"]
+categories = ["command-line-utilities", "filesystem"]
+
+[[bin]]
+name = "tree-cleaner"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.30"
+rustix = { version = "1", features = ["fs"] }
+sysinfo = { version = "0.39", default-features = false, features = ["disk"] }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+anyhow = "1"
+thiserror = "2"
+crossbeam-channel = "0.5"
+parking_lot = "0.12"
+dirs = "7"
+glob = "0.3"
+trash = "5"
+unicode-width = "0.2"
+log = "0.4"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 1

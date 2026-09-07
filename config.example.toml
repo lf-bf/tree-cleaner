@@ -1,0 +1,38 @@
+# tree-cleaner configuration — copy to ~/.config/tree-cleaner/config.toml
+# (or run `tree-cleaner config init`). Every key is optional.
+
+[scan]
+worker_threads = 0                 # 0 = twice the number of cores
+dense_directory_threshold = 20000  # more entries than this → summed, never listed
+materialize_depth = 10             # levels below the scan origin that become nodes
+max_depth = 256
+skip_paths = ["/System/Volumes/Data", "/private/var/vm", "/dev", "/proc", "/sys", "/run"]
+cross_mount_points = false
+deduplicate_hard_links = true
+background_root_scan = true        # measure / in the background at startup
+
+[view]
+row_limit = 100                    # rows per directory, largest first (+/- in the app)
+heaviest_files_limit = 100         # T view
+size_mode = "allocated"            # or "apparent"
+size_base = "decimal"              # GB like Finder, or "binary" for GiB
+frame_interval_ms = 33
+
+[deletion]
+default_mode = "permanent"         # or "trash"
+never_delete = []                  # extra paths that are refused, `~` allowed
+
+[cleaner]
+search_roots = ["~"]
+excluded_paths = ["~/Library", "~/.Trash", "~/.cache", "~/.cargo", "~/.rustup", "~/.npm", "~/.nvm",
+                  "~/.local", "~/.vscode", "~/.cursor", "~/.docker", "~/Applications"]
+protected_paths = ["~/Documents/Projetos+/keep-this/**"]   # globs; shown but never cleaned
+disabled_categories = []           # see `tree-cleaner categories`
+discovery_max_depth = 14
+
+[cleaner.docker]
+enabled = true
+protected_images = ["postgres:*", "ghcr.io/my-org/*"]   # globs on repo:tag, repo or id
+prune_containers = true
+prune_volumes = false
+prune_build_cache = true
