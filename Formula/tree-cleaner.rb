@@ -1,18 +1,19 @@
 # Homebrew formula for tree-cleaner.
 #
-# Until the first tagged release exists, install from the repository head:
-#   brew tap lf-bf/tree-cleaner git@github.com:lf-bf/tree-cleaner.git
-#   brew install --HEAD lf-bf/tree-cleaner/tree-cleaner
+#   brew tap lf-bf/tree-cleaner ssh://git@github.com/lf-bf/tree-cleaner.git
+#   brew install lf-bf/tree-cleaner/tree-cleaner
+#   brew upgrade tree-cleaner        # after `brew update`
 #
-# After tagging a release (git tag v0.2.0 && git push --tags), fill `url` and `sha256`
-# with the tarball of that tag (`shasum -a 256 v0.2.0.tar.gz`) and drop `--HEAD`.
+# The repository is private, so the formula builds from the release tag over SSH instead of
+# downloading a tarball. `tag` and `version` are bumped by semantic-release on every release
+# (scripts/release/prepare.sh); do not edit them by hand.
 class TreeCleaner < Formula
   desc "Interactive terminal explorer and cleaner for disk usage"
   homepage "https://github.com/lf-bf/tree-cleaner"
-  url "https://github.com/lf-bf/tree-cleaner/archive/refs/tags/v0.2.0.tar.gz"
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  url "ssh://git@github.com/lf-bf/tree-cleaner.git", using: :git, tag: "v0.2.0"
+  version "0.2.0"
   license "MIT"
-  head "git@github.com:lf-bf/tree-cleaner.git", branch: "main"
+  head "ssh://git@github.com/lf-bf/tree-cleaner.git", branch: "main"
 
   depends_on "rust" => :build
 
@@ -21,7 +22,7 @@ class TreeCleaner < Formula
   end
 
   test do
-    assert_match "tree-cleaner", shell_output("#{bin}/tree-cleaner --version")
+    assert_match "tree-cleaner #{version}", shell_output("#{bin}/tree-cleaner --version")
     system bin/"tree-cleaner", "categories"
   end
 end
