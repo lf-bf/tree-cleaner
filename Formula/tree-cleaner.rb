@@ -4,12 +4,12 @@
 #   brew tap lf-bf/tree-cleaner git@github.com:lf-bf/tree-cleaner.git
 #   brew install --HEAD lf-bf/tree-cleaner/tree-cleaner
 #
-# After tagging a release (git tag v0.1.0 && git push --tags), fill `url` and `sha256`
-# with the tarball of that tag (`shasum -a 256 v0.1.0.tar.gz`) and drop `--HEAD`.
+# After tagging a release (git tag v0.2.0 && git push --tags), fill `url` and `sha256`
+# with the tarball of that tag (`shasum -a 256 v0.2.0.tar.gz`) and drop `--HEAD`.
 class TreeCleaner < Formula
   desc "Interactive terminal explorer and cleaner for disk usage"
   homepage "https://github.com/lf-bf/tree-cleaner"
-  url "https://github.com/lf-bf/tree-cleaner/archive/refs/tags/v0.1.0.tar.gz"
+  url "https://github.com/lf-bf/tree-cleaner/archive/refs/tags/v0.2.0.tar.gz"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
   license "MIT"
   head "git@github.com:lf-bf/tree-cleaner.git", branch: "main"

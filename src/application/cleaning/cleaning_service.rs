@@ -3,8 +3,10 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
-use crossbeam_channel::Receiver;
+use crossbeam_channel::{Receiver, Sender};
 
 use super::discovery_rules::DiscoveryRules;
 use super::docker_inventory::{DockerInventory, DockerStatus, spawn_docker_inventory};
@@ -16,8 +18,76 @@ use crate::domain::cleaning::{
     CleaningReport, CleaningStatus, DockerPruneKind, Protection, ProtectionRules,
 };
 use crate::domain::deletion::{CriticalPathGuard, DeletionMode};
-use crate::domain::ports::{CommandRunner, ContainerEngine, FileRemover, FileSystemProbe, RemovalError};
+use crate::domain::ports::{
+    CommandRunner, ContainerEngine, FileRemover, FileSystemProbe, RemovalError, RemovalObserver,
+};
 use crate::domain::storage::{ByteSize, RootPurpose, SearchId, SizeMode};
+
+/// How often progress inside one candidate is reported at most.
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(50);
+
+/// Progress messages sent while a plan runs on a background thread.
+#[derive(Clone, Debug)]
+pub enum CleaningProgress {
+    Started { total: usize },
+    ItemStarted { index: usize, label: String },
+    ItemProgress { index: usize, entries_removed: u64, bytes_removed: u64, current: PathBuf },
+    ItemFinished { index: usize, outcome: CleaningOutcome },
+    Finished(CleaningReport),
+}
+
+/// Lets the interface follow and cancel a run.
+#[derive(Debug)]
+pub struct CleaningHandle {
+    pub receiver: Receiver<CleaningProgress>,
+    cancel: Arc<AtomicBool>,
+}
+
+impl CleaningHandle {
+    pub fn request_cancel(&self) {
+        self.cancel.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_cancel_requested(&self) -> bool {
+        self.cancel.load(Ordering::SeqCst)
+    }
+}
+
+/// Forwards removal progress for one candidate, throttled, and relays cancellation.
+struct ItemObserver<'a> {
+    index: usize,
+    sender: &'a Sender<CleaningProgress>,
+    cancel: &'a AtomicBool,
+    entries_removed: u64,
+    bytes_removed: u64,
+    last_report: Instant,
+}
+
+impl<'a> ItemObserver<'a> {
+    fn new(index: usize, sender: &'a Sender<CleaningProgress>, cancel: &'a AtomicBool) -> Self {
+        Self { index, sender, cancel, entries_removed: 0, bytes_removed: 0, last_report: Instant::now() }
+    }
+}
+
+impl RemovalObserver for ItemObserver<'_> {
+    fn entry_removed(&mut self, path: &Path, bytes: u64) {
+        self.entries_removed += 1;
+        self.bytes_removed = self.bytes_removed.saturating_add(bytes);
+        if self.last_report.elapsed() >= PROGRESS_INTERVAL {
+            self.last_report = Instant::now();
+            let _ = self.sender.send(CleaningProgress::ItemProgress {
+                index: self.index,
+                entries_removed: self.entries_removed,
+                bytes_removed: self.bytes_removed,
+                current: path.to_path_buf(),
+            });
+        }
+    }
+
+    fn should_cancel(&self) -> bool {
+        self.cancel.load(Ordering::Relaxed)
+    }
+}
 
 /// Everything needed to run a plan, cheap to clone onto a background thread.
 #[derive(Clone)]
@@ -29,46 +99,100 @@ pub struct CleaningExecutor {
 }
 
 impl CleaningExecutor {
-    pub fn execute(&self, plan: &CleaningPlan) -> CleaningReport {
+    /// Runs the plan, reporting each candidate as it starts and finishes. Candidates after a
+    /// cancellation request are reported as cancelled without being touched.
+    pub fn execute(
+        &self,
+        plan: &CleaningPlan,
+        progress: &Sender<CleaningProgress>,
+        cancel: &AtomicBool,
+    ) -> CleaningReport {
+        let _ = progress.send(CleaningProgress::Started { total: plan.candidates.len() });
         let mut report = CleaningReport { outcomes: Vec::new(), reclaimed_estimate: ByteSize::ZERO };
-        for candidate in &plan.candidates {
-            let (status, detail) = self.execute_one(candidate);
-            if status == CleaningStatus::Cleaned {
-                report.reclaimed_estimate += candidate.size.unwrap_or(ByteSize::ZERO);
-            }
-            report.outcomes.push(CleaningOutcome {
-                candidate: candidate.id,
-                label: candidate.label.clone(),
-                status,
-                detail,
-            });
+        for (index, candidate) in plan.candidates.iter().enumerate() {
+            let outcome = if cancel.load(Ordering::SeqCst) {
+                CleaningOutcome {
+                    candidate: candidate.id,
+                    label: candidate.label.clone(),
+                    status: CleaningStatus::Cancelled,
+                    detail: "cancelled before it started".to_owned(),
+                    reclaimed: ByteSize::ZERO,
+                    entries_removed: 0,
+                }
+            } else {
+                let _ =
+                    progress.send(CleaningProgress::ItemStarted { index, label: candidate.label.clone() });
+                let mut observer = ItemObserver::new(index, progress, cancel);
+                let (status, detail, engine_reclaimed) = self.execute_one(candidate, &mut observer);
+                let reclaimed = if observer.bytes_removed > 0 {
+                    ByteSize::new(observer.bytes_removed)
+                } else if status == CleaningStatus::Cleaned {
+                    engine_reclaimed.or(candidate.size).unwrap_or(ByteSize::ZERO)
+                } else {
+                    ByteSize::ZERO
+                };
+                CleaningOutcome {
+                    candidate: candidate.id,
+                    label: candidate.label.clone(),
+                    status,
+                    detail,
+                    reclaimed,
+                    entries_removed: observer.entries_removed,
+                }
+            };
+            report.reclaimed_estimate += outcome.reclaimed;
+            let _ = progress.send(CleaningProgress::ItemFinished { index, outcome: outcome.clone() });
+            report.outcomes.push(outcome);
         }
+        let _ = progress.send(CleaningProgress::Finished(report.clone()));
         report
     }
 
-    fn execute_one(&self, candidate: &CleaningCandidate) -> (CleaningStatus, String) {
+    /// Spawns the plan on its own thread; progress arrives through the handle.
+    pub fn execute_in_background(self, plan: CleaningPlan) -> CleaningHandle {
+        let (sender, receiver) = crossbeam_channel::unbounded();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_flag = Arc::clone(&cancel);
+        std::thread::Builder::new()
+            .name("tree-cleaner-clean".to_owned())
+            .spawn(move || {
+                self.execute(&plan, &sender, &cancel_flag);
+            })
+            .expect("failed to spawn cleaning thread");
+        CleaningHandle { receiver, cancel }
+    }
+
+    /// Returns the status, a detail line and the bytes the engine itself reported.
+    fn execute_one(
+        &self,
+        candidate: &CleaningCandidate,
+        observer: &mut dyn RemovalObserver,
+    ) -> (CleaningStatus, String, Option<ByteSize>) {
         match &candidate.location {
             CleaningLocation::Directory(path) => {
                 if let Err(reason) = self.guard.check(path) {
-                    return (CleaningStatus::Skipped(reason.clone()), reason);
+                    return (CleaningStatus::Skipped(reason.clone()), reason, None);
                 }
-                match self.remover.remove(path, DeletionMode::Permanent) {
-                    Ok(()) => (CleaningStatus::Cleaned, path.display().to_string()),
-                    Err(RemovalError::NotFound) => (CleaningStatus::Cleaned, "already gone".to_owned()),
+                match self.remover.remove(path, DeletionMode::Permanent, observer) {
+                    Ok(_) => (CleaningStatus::Cleaned, path.display().to_string(), None),
+                    Err(RemovalError::NotFound) => (CleaningStatus::Cleaned, "already gone".to_owned(), None),
                     Err(RemovalError::PermissionDenied) => {
-                        (CleaningStatus::NeedsPrivileges, path.display().to_string())
+                        (CleaningStatus::NeedsPrivileges, path.display().to_string(), None)
                     }
-                    Err(RemovalError::Other(reason)) => (CleaningStatus::Failed(reason.clone()), reason),
+                    Err(RemovalError::Cancelled) => (CleaningStatus::Cancelled, "cancelled".to_owned(), None),
+                    Err(RemovalError::Other(reason)) => {
+                        (CleaningStatus::Failed(reason.clone()), reason, None)
+                    }
                 }
             }
             CleaningLocation::DirectoryContents(path) => {
                 if path.components().count() <= 2 {
                     let reason = format!("refusing to empty {}", path.display());
-                    return (CleaningStatus::Skipped(reason.clone()), reason);
+                    return (CleaningStatus::Skipped(reason.clone()), reason, None);
                 }
-                match self.remover.remove_contents(path, DeletionMode::Permanent) {
+                match self.remover.remove_contents(path, DeletionMode::Permanent, observer) {
                     Ok(result) if result.failed.is_empty() => {
-                        (CleaningStatus::Cleaned, format!("{} entries removed", result.removed))
+                        (CleaningStatus::Cleaned, format!("{} entries removed", result.removed), None)
                     }
                     Ok(result) => {
                         let denied =
@@ -80,40 +204,43 @@ impl CleaningExecutor {
                             denied
                         );
                         if denied > 0 {
-                            (CleaningStatus::NeedsPrivileges, detail)
+                            (CleaningStatus::NeedsPrivileges, detail, None)
                         } else {
-                            (CleaningStatus::Failed(detail.clone()), detail)
+                            (CleaningStatus::Failed(detail.clone()), detail, None)
                         }
                     }
                     Err(RemovalError::PermissionDenied) => {
-                        (CleaningStatus::NeedsPrivileges, path.display().to_string())
+                        (CleaningStatus::NeedsPrivileges, path.display().to_string(), None)
                     }
-                    Err(RemovalError::NotFound) => (CleaningStatus::Cleaned, "already gone".to_owned()),
-                    Err(RemovalError::Other(reason)) => (CleaningStatus::Failed(reason.clone()), reason),
+                    Err(RemovalError::NotFound) => (CleaningStatus::Cleaned, "already gone".to_owned(), None),
+                    Err(RemovalError::Cancelled) => (CleaningStatus::Cancelled, "cancelled".to_owned(), None),
+                    Err(RemovalError::Other(reason)) => {
+                        (CleaningStatus::Failed(reason.clone()), reason, None)
+                    }
                 }
             }
             CleaningLocation::DockerImage { id, reference } => {
                 match self.container_engine.remove_images(std::slice::from_ref(id)) {
-                    Ok(output) => (CleaningStatus::Cleaned, first_line(&output, reference)),
-                    Err(error) => (CleaningStatus::Failed(error.to_string()), error.to_string()),
+                    Ok(outcome) => {
+                        let summary =
+                            if outcome.summary.is_empty() { reference.clone() } else { outcome.summary };
+                        (CleaningStatus::Cleaned, summary, outcome.reclaimed)
+                    }
+                    Err(error) => (CleaningStatus::Failed(error.to_string()), error.to_string(), None),
                 }
             }
             CleaningLocation::DockerPrune(kind) => match self.container_engine.prune(*kind) {
-                Ok(output) => (CleaningStatus::Cleaned, last_line(&output, kind.label())),
-                Err(error) => (CleaningStatus::Failed(error.to_string()), error.to_string()),
+                Ok(outcome) => (CleaningStatus::Cleaned, outcome.summary, outcome.reclaimed),
+                Err(error) => (CleaningStatus::Failed(error.to_string()), error.to_string(), None),
             },
             CleaningLocation::Command { program, arguments } => {
                 match self.command_runner.run(program, arguments) {
-                    Ok(output) => (CleaningStatus::Cleaned, last_line(&output.stdout, program)),
-                    Err(failure) => (CleaningStatus::Failed(failure.detail.clone()), failure.detail),
+                    Ok(output) => (CleaningStatus::Cleaned, last_line(&output.stdout, program), None),
+                    Err(failure) => (CleaningStatus::Failed(failure.detail.clone()), failure.detail, None),
                 }
             }
         }
     }
-}
-
-fn first_line(text: &str, fallback: &str) -> String {
-    text.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or(fallback).to_owned()
 }
 
 fn last_line(text: &str, fallback: &str) -> String {
@@ -458,7 +585,8 @@ impl CleaningService {
         plan
     }
 
-    /// Removes candidates that were cleaned and re-measures the rest.
+    /// Removes candidates that were cleaned and re-measures those that were only partially
+    /// removed (cancelled, failed half way, waiting for privileges).
     pub fn absorb_report(&mut self, report: &CleaningReport, coordinator: &mut TreeCoordinator) {
         let cleaned: HashSet<CandidateId> = report
             .outcomes
@@ -466,11 +594,20 @@ impl CleaningService {
             .filter(|outcome| outcome.status == CleaningStatus::Cleaned)
             .map(|outcome| outcome.candidate)
             .collect();
+        let partially_removed: HashSet<CandidateId> = report
+            .outcomes
+            .iter()
+            .filter(|outcome| outcome.status != CleaningStatus::Cleaned && outcome.entries_removed > 0)
+            .map(|outcome| outcome.candidate)
+            .collect();
         for candidate in &self.candidates {
+            let Some(node) = candidate.measurement_node else {
+                continue;
+            };
             if cleaned.contains(&candidate.id) {
-                if let Some(node) = candidate.measurement_node {
-                    coordinator.remove_subtree(node);
-                }
+                coordinator.remove_subtree(node);
+            } else if partially_removed.contains(&candidate.id) {
+                coordinator.rescan(node, false);
             }
         }
         self.candidates.retain(|candidate| !cleaned.contains(&candidate.id));

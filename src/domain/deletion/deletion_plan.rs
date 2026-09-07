@@ -60,14 +60,43 @@ pub enum DeletionStatus {
     Removed,
     MovedToTrash,
     NeedsPrivileges,
+    /// The user cancelled the run before or while this item was being removed.
+    Cancelled,
     Refused(String),
     Failed(String),
+}
+
+impl DeletionStatus {
+    pub const fn is_success(&self) -> bool {
+        matches!(self, Self::Removed | Self::MovedToTrash)
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct DeletionOutcome {
     pub item: DeletionItem,
     pub status: DeletionStatus,
+    /// Bytes actually freed, as observed while removing. Zero when nothing was measured.
+    pub bytes_removed: ByteSize,
+    pub entries_removed: u64,
+}
+
+impl DeletionOutcome {
+    /// What the item gave back: the measured bytes when known, otherwise the estimate.
+    pub fn reclaimed(&self) -> ByteSize {
+        if !self.bytes_removed.is_zero() {
+            self.bytes_removed
+        } else if self.status.is_success() {
+            self.item.size
+        } else {
+            ByteSize::ZERO
+        }
+    }
+
+    /// Something was removed even though the item as a whole did not finish.
+    pub fn is_partial(&self) -> bool {
+        !self.status.is_success() && self.entries_removed > 0
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -77,13 +106,15 @@ pub struct DeletionReport {
 
 impl DeletionReport {
     pub fn succeeded(&self) -> impl Iterator<Item = &DeletionOutcome> {
-        self.outcomes.iter().filter(|outcome| {
-            matches!(outcome.status, DeletionStatus::Removed | DeletionStatus::MovedToTrash)
-        })
+        self.outcomes.iter().filter(|outcome| outcome.status.is_success())
     }
 
     pub fn reclaimed(&self) -> ByteSize {
-        self.succeeded().map(|outcome| outcome.item.size).fold(ByteSize::ZERO, ByteSize::saturating_add)
+        self.outcomes.iter().map(DeletionOutcome::reclaimed).fold(ByteSize::ZERO, ByteSize::saturating_add)
+    }
+
+    pub fn cancelled_count(&self) -> usize {
+        self.outcomes.iter().filter(|outcome| outcome.status == DeletionStatus::Cancelled).count()
     }
 
     pub fn needing_privileges(&self) -> Vec<DeletionItem> {

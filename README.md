@@ -8,7 +8,7 @@ and knows where developer machines hide their gigabytes (Docker, `node_modules`,
 environments, Cargo targets, caches).
 
 ```
-╭ tree-cleaner v0.1.0 ─────────────────────── ⠹ scanning 735K files · 245K dirs · 89K files/s · 8/8 thr · queue 703 ╮
+╭ tree-cleaner v0.2.0 ─────────────────────── ⠹ scanning 735K files · 245K dirs · 89K files/s · 8/8 thr · queue 703 ╮
 │  1 Dashboard   2 Explorer   3 Heaviest   4 Cleaner                                                  allocated · GB │
 │╭ ~/Documents ─────────────────────────────────────────── 312 GB · 1.2M files · 45K dirs  ⠹ scanning · 4 pending ╮│
 ││    # Name                              Size      %                        Items State                          ││
@@ -103,6 +103,14 @@ in decimal units like Finder; `a` toggles apparent sizes, `:base binary` switche
 
 * Marked items are deleted permanently (`rm -rf` semantics) after you type `yes`, or moved
   to the Trash with `:trash on`.
+* Every deletion and cleaning run opens a **progress modal** that locks the rest of the
+  interface until it is done: a step bar over the items, bytes and entries freed so far,
+  the item and file being removed right now, and the outcome of the last items. Nothing
+  else can be typed while it runs, so no navigation, mark or rescan can race with the
+  removal. `Esc` cancels after the current item finishes (items already removed stay
+  removed; a directory removed half way is measured again). Ctrl+C still aborts the
+  program. Removal walks each tree itself, file by file, which is what makes the live
+  counters possible.
 * Anything the current user cannot remove is collected; you are asked once whether to run
   `sudo` for those paths. The terminal is handed back so `sudo` asks for your password
   itself: the program never sees it.

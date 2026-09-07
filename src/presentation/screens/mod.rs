@@ -4,6 +4,7 @@ mod cleaner;
 mod dashboard;
 mod explorer;
 mod heaviest;
+mod operation;
 mod overlays;
 
 use ratatui::Frame;
@@ -45,6 +46,9 @@ impl App {
         self.render_footer(frame, footer_area);
         if let Some(overlay) = self.overlay.clone() {
             self.render_overlay(frame, &overlay);
+        }
+        if let Some(run) = &self.operation {
+            self.render_operation(frame, run);
         }
     }
 

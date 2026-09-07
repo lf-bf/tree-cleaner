@@ -2,4 +2,4 @@
 
 pub mod deletion_service;
 
-pub use deletion_service::{DeletionProgress, DeletionService};
+pub use deletion_service::{DeletionHandle, DeletionProgress, DeletionService};
