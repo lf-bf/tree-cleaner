@@ -3,7 +3,9 @@
 # carries it, so the release commit and its tag are self-consistent:
 #   - Cargo.toml   [package] version
 #   - Cargo.lock   entry of this package
-#   - Formula/tree-cleaner.rb   `tag:` (Homebrew builds from the release tag)
+#
+# The Homebrew formula is not touched here: it carries the checksums of the release
+# binaries, which only exist once the release is published (scripts/release/update-formula.sh).
 set -euo pipefail
 
 version="${1:?usage: prepare.sh <version>}"
@@ -15,8 +17,5 @@ cd "$root"
 perl -pi -e 's/^version = "[^"]*"/version = "'"$version"'"/ if !$done && ($done = /^version = /)' Cargo.toml
 cargo update --workspace --quiet
 
-perl -pi -e 's/tag: "v[^"]*"/tag: "v'"$version"'"/' Formula/tree-cleaner.rb
-
 grep -q "^version = \"$version\"" Cargo.toml || { echo "Cargo.toml was not updated" >&2; exit 1; }
-grep -q "tag: \"v$version\"" Formula/tree-cleaner.rb || { echo "Formula was not updated" >&2; exit 1; }
 echo "prepared release v$version"
