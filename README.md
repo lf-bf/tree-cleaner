@@ -235,6 +235,13 @@ formula at the new tag, commits all of that as `chore(release): vX.Y.Z [skip ci]
 merges keep the PR title, so title pull requests with the same prefixes. Never edit the
 version by hand.
 
+Pull requests also run the release in dry-run mode against their own branch, so a broken
+preset or changelog template fails there instead of after the merge. The changelog preset
+(`conventional-changelog-conventionalcommits`) has to stay on the major that matches the
+`conventional-changelog-writer` semantic-release ships: the `9.x` series for
+semantic-release 25. Version `10` moved to a new template engine that needs `writer@9`,
+which fails at the point where the notes are rendered.
+
 To make the tap installable without SSH access (a public tap with bottles or binary
 formulae), the release job would need a token able to push to a public `homebrew-tap`
 repository; the pieces (tarballs and `.sha256` files per target) are already produced.
