@@ -26,27 +26,18 @@ environments, Cargo targets, caches).
 
 ### Homebrew (macOS and Linux)
 
-Since version 6, Homebrew refuses to load formulae from a tap it does not trust, and the
-`brew tap` step itself fails with `invalid syntax in tap!` until the trust is granted. So
-the first install takes three commands, in this order:
-
 ```bash
-brew trust --formula lf-bf/tree-cleaner/tree-cleaner
-brew tap lf-bf/tree-cleaner https://github.com/lf-bf/tree-cleaner.git
-brew install tree-cleaner
+brew install lf-bf/tap/tree-cleaner
 ```
 
-The first command trusts only this formula, not the whole tap (`brew untrust` reverts it,
-`brew trust` lists what is trusted). The tap URL is needed because the formula lives in
-this repository rather than in a `homebrew-tap` one.
+That one command taps [lf-bf/homebrew-tap](https://github.com/lf-bf/homebrew-tap), trusts
+that single formula (Homebrew 6 requires trust before it loads a non-official formula) and
+installs the prebuilt binary of the latest release: macOS on Apple silicon or Intel, Linux
+on x86_64. It finishes in a second or two without building anything. Afterwards the short
+name works too, so upgrades are `brew update && brew upgrade tree-cleaner`.
 
-The install itself downloads the prebuilt binary of the latest release (macOS on Apple
-silicon or Intel, Linux on x86_64) and finishes in a second or two, without building
-anything. Later versions arrive with `brew update && brew upgrade tree-cleaner`.
-
-On a platform without a published binary, build from source with
-`brew install --HEAD lf-bf/tree-cleaner/tree-cleaner` (needs the `rust` formula) or with
-Cargo below.
+On a platform without a published binary, `brew install --HEAD lf-bf/tap/tree-cleaner`
+builds from source instead (needs the `rust` formula), as does Cargo below.
 
 ### Cargo
 
@@ -252,10 +243,10 @@ preset or changelog template fails there instead of after the merge. The changel
 semantic-release 25. Version `10` moved to a new template engine that needs `writer@9`,
 which fails at the point where the notes are rendered.
 
-After the binaries are attached, a last job regenerates `Formula/tree-cleaner.rb` from the
-release checksums (`scripts/release/update-formula.sh`) and commits it as
-`chore(release): point the Homebrew formula at vX.Y.Z [skip ci]`. The formula therefore
-always installs the newest published binaries, and no checksum is ever written by hand.
+The Homebrew formula lives in [lf-bf/homebrew-tap](https://github.com/lf-bf/homebrew-tap)
+and is generated there from the release checksums, so it always installs the newest
+published binaries and no checksum is written by hand. That repository checks for a new
+release hourly; `gh workflow run sync --repo lf-bf/homebrew-tap` picks one up immediately.
 
 ## License
 
