@@ -31,6 +31,51 @@ jobs:
       - run: cargo build --release --locked
       - run: ./target/release/tree-cleaner --version
 
+  # The release itself only runs after a merge, so a broken preset or changelog template
+  # would only surface then (it did once: conventionalcommits@10 needs a newer writer than
+  # semantic-release ships). This job treats the pull request branch as a release branch and
+  # runs semantic-release in dry-run mode, which reaches analyzeCommits and generateNotes
+  # without tagging, committing or publishing anything.
+  release-dry-run:
+    name: release dry run
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      # semantic-release verifies push access even in dry-run mode; nothing is written.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The default for a pull request is the merge ref, which semantic-release sees as
+          # a branch of its own and refuses to analyse. Check out the branch itself.
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      # --no-ci overrides the "this is a pull request, skip" guard; --branches makes the
+      # pull request branch the release branch for this run only.
+      - name: Dry run, and fail unless the notes were rendered
+        run: |
+          set -euo pipefail
+          # env-ci derives the branch from GITHUB_REF, which a pull request sets to
+          # refs/pull/N/merge; semantic-release would then skip the run without analysing
+          # anything. The variable is set on the command (the runner reserves GITHUB_* in
+          # `env:` blocks) so the dry run really reaches analyzeCommits and generateNotes.
+          GITHUB_REF="refs/heads/${{ github.head_ref }}" \
+            npx semantic-release --dry-run --no-ci --branches "${{ github.head_ref }}" | tee dry-run.log
+          if grep -q "There are no relevant changes" dry-run.log; then
+            echo "No releasable commit on this branch; notes were not exercised."
+            exit 0
+          fi
+          grep -q "Release note for version" dry-run.log
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # Semantic release: reads the Conventional Commits since the last tag, decides the next
   # version (feat → minor, fix/perf → patch, "!" or BREAKING CHANGE → major), updates
   # Cargo.toml, Cargo.lock, CHANGELOG.md and the Homebrew formula, commits with [skip ci],
