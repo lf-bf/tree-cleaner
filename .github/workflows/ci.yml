@@ -70,6 +70,10 @@ jobs:
           grep -q "Release note for version" dry-run.log
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # env-ci derives the branch from GITHUB_REF, which for a pull request is
+          # refs/pull/N/merge; semantic-release would then skip the run. Point it at the
+          # branch so the analysis and the notes actually happen.
+          GITHUB_REF: refs/heads/${{ github.head_ref }}
 
   # Semantic release: reads the Conventional Commits since the last tag, decides the next
   # version (feat → minor, fix/perf → patch, "!" or BREAKING CHANGE → major), updates
