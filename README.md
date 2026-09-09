@@ -83,7 +83,7 @@ background scanning · `?` help · `L` log · `:` command line · `q` quit.
 `:top [n]` · `:filter <text>` · `:threads <n>` · `:dense <n>` · `:depth <n>` ·
 `:pause` / `:resume` · `:mode allocated|apparent` · `:base decimal|binary` ·
 `:trash on|off` · `:export <file>` (TSV of the current rows) · `:reveal` · `:mounts` ·
-`:stats` · `:log` · `:config [save]` · `:q`.
+`:stats` · `:log` · `:theme [name]` · `:settings` · `:config [save|edit|reload]` · `:q`.
 
 ## How the scan stays fast
 
@@ -141,9 +141,45 @@ in decimal units like Finder; `a` toggles apparent sizes, `:base binary` switche
 
 ## Configuration
 
-`~/.config/tree-cleaner/config.toml` (or `$XDG_CONFIG_HOME`). Every key is optional; see
-[`config.example.toml`](config.example.toml) for the full set with comments.
-`:config save` writes the settings you changed at runtime.
+`~/.config/tree-cleaner/config.toml` (or `$XDG_CONFIG_HOME/tree-cleaner/config.toml`). Every
+key is optional; see [`config.example.toml`](config.example.toml) for the full set with
+comments.
+
+The **Settings** popup (`:settings`) edits everything live on top of the current screen:
+theme, size mode and units, rows shown, scanner threads and thresholds, deletion mode,
+Docker options. Changes apply immediately; `s` writes them to the file (`:config save` does
+the same from any screen), `e` opens the file in `$VISUAL`/`$EDITOR` and reloads it, `R`
+resets to the defaults, `Esc` closes. Quitting with unsaved preference changes asks whether
+to save them.
+
+### Themes
+
+Eleven built-in palettes: `claude` (default), `btop`, `nord`, `dracula`, `gruvbox`,
+`catppuccin`, `tokyo-night`, `solarized`, `monochrome`, `light` (for light terminal
+backgrounds) and `basic` (16 ANSI colours, also forced automatically when the terminal has
+no truecolor). Switch with `←`/`→` on the Theme row of the Settings popup or with
+`:theme <name>`; `:theme` alone lists them.
+
+Any colour can be overridden in a `[theme]` table of the config file, on top of the chosen
+palette. Values are `#rrggbb`, `#rgb`, an ANSI name (`red`, `light_blue`, `dark_gray`, ...)
+or a 0-255 palette index:
+
+```toml
+[view]
+theme = "nord"
+
+[theme]
+accent = "#d08770"        # highlights, keys, selected bars
+directory = "#81a1c1"     # directory names
+success = "#a3be8c"
+warning = "#ebcb8b"
+danger = "#bf616a"
+selection_background = "#3b4252"
+```
+
+The full list of keys: `accent`, `accent_soft`, `directory`, `file`, `text`, `muted`,
+`faint`, `success`, `warning`, `danger`, `border`, `border_focused`,
+`selection_background`, `bar_track`.
 
 ## Architecture
 

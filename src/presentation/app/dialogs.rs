@@ -11,7 +11,17 @@ pub enum PendingAction {
     Delete(DeletionPlan),
     Clean(CleaningPlan),
     ElevateDelete(Vec<DeletionItem>),
-    ElevateClean { whole: Vec<PathBuf>, contents: Vec<PathBuf>, candidates: Vec<CandidateId> },
+    ElevateClean {
+        whole: Vec<PathBuf>,
+        contents: Vec<PathBuf>,
+        candidates: Vec<CandidateId>,
+    },
+    /// Open the configuration file in `$EDITOR` with the interface suspended.
+    EditConfigFile,
+    /// Write the preferences and leave.
+    SaveAndQuit,
+    /// Go back to the default preferences (in memory; `s` persists them).
+    ResetSettings,
     Quit,
 }
 
@@ -21,6 +31,8 @@ pub enum Confirmation {
     YesKey,
     /// The user has to type a word and press Enter.
     TypedWord { expected: String, typed: String },
+    /// `y` runs the action, `n` quits without saving, Esc stays.
+    SaveOrDiscard,
 }
 
 #[derive(Clone, Debug)]
@@ -35,7 +47,7 @@ pub struct ConfirmDialog {
 impl ConfirmDialog {
     pub fn typed_word_matches(&self) -> bool {
         match &self.confirmation {
-            Confirmation::YesKey => true,
+            Confirmation::YesKey | Confirmation::SaveOrDiscard => true,
             Confirmation::TypedWord { expected, typed } => typed.trim().eq_ignore_ascii_case(expected),
         }
     }
@@ -60,6 +72,8 @@ pub struct MessageDialog {
 pub enum Overlay {
     Help,
     Log,
+    /// The preferences popup (`:settings`). Keeps focus until Esc.
+    Settings,
     Confirm(ConfirmDialog),
     Message(MessageDialog),
 }

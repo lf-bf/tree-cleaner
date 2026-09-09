@@ -5,6 +5,7 @@ use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph, Wrap};
+use unicode_width::UnicodeWidthStr;
 
 use crate::presentation::theme::Theme;
 
@@ -40,7 +41,8 @@ pub fn centered(area: Rect, width: u16, height: u16) -> Rect {
     horizontal
 }
 
-/// Draws a modal dialog with the given lines and returns the inner area.
+/// Draws a modal dialog with the given lines and returns the inner area. The height
+/// accounts for lines that wrap inside the dialog.
 pub fn dialog(
     frame: &mut Frame,
     theme: &Theme,
@@ -49,8 +51,18 @@ pub fn dialog(
     width: u16,
     border: Style,
 ) -> Rect {
-    let height = (lines.len() as u16).saturating_add(4).min(frame.area().height);
-    let area = centered(frame.area(), width.min(frame.area().width.saturating_sub(2)), height);
+    let width = width.min(frame.area().width.saturating_sub(2)).max(12);
+    let inner_width = usize::from(width.saturating_sub(6)).max(1);
+    let wrapped_rows: usize = lines
+        .iter()
+        .map(|line| {
+            let line_width: usize =
+                line.spans.iter().map(|span| UnicodeWidthStr::width(span.content.as_ref())).sum();
+            line_width.max(1).div_ceil(inner_width)
+        })
+        .sum();
+    let height = (wrapped_rows as u16).saturating_add(4).min(frame.area().height);
+    let area = centered(frame.area(), width, height);
     frame.render_widget(Clear, area);
     let block = Block::new()
         .borders(Borders::ALL)

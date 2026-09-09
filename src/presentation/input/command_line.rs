@@ -31,6 +31,11 @@ pub enum DeveloperCommand {
     Cleaner,
     Dashboard,
     Explorer,
+    Settings,
+    /// `:theme` lists the palettes, `:theme <name>` switches.
+    Theme(Option<String>),
+    EditConfig,
+    ReloadConfig,
     ClearMarks,
     Unknown(String),
 }
@@ -143,9 +148,15 @@ pub fn parse_command(text: &str) -> DeveloperCommand {
         "log" | "logs" => DeveloperCommand::ShowLog,
         "stats" | "statistics" | "status" => DeveloperCommand::ShowStatistics,
         "config" => match argument {
-            Some("save") => DeveloperCommand::SaveConfig,
+            Some("save") | Some("write") => DeveloperCommand::SaveConfig,
+            Some("edit") => DeveloperCommand::EditConfig,
+            Some("reload") | Some("load") => DeveloperCommand::ReloadConfig,
             _ => DeveloperCommand::ShowConfigPath,
         },
+        "settings" | "prefs" | "preferences" | "options" => DeveloperCommand::Settings,
+        "theme" | "colors" | "colours" | "palette" => {
+            DeveloperCommand::Theme(argument.map(|value| value.to_ascii_lowercase()))
+        }
         "goto" | "cd" | "go" | "scan" | "open" => match argument {
             Some(path) => DeveloperCommand::GoTo(PathBuf::from(path)),
             None => DeveloperCommand::Unknown(format!("{name} needs a path")),
@@ -218,6 +229,8 @@ pub const COMMAND_REFERENCE: &[(&str, &str)] = &[
     (":mounts", "list mount points in the log"),
     (":stats", "scanner statistics"),
     (":log", "show the log"),
-    (":config [save]", "config file path / write current settings"),
+    (":theme [name]", "list palettes / switch palette"),
+    (":settings", "preferences popup"),
+    (":config [save|edit|reload]", "config file path / write / edit in $EDITOR / reload"),
     (":q", "quit"),
 ];

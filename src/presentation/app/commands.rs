@@ -4,7 +4,7 @@ use std::io::Write;
 
 use super::App;
 use super::Screen;
-use super::dialogs::{MessageDialog, Overlay, Severity};
+use super::dialogs::{MessageDialog, Overlay, PendingAction, Severity};
 use crate::domain::deletion::DeletionMode;
 use crate::domain::storage::{SizeBase, SizeMode};
 use crate::presentation::formatting;
@@ -13,7 +13,7 @@ use crate::presentation::input::DeveloperCommand;
 impl App {
     pub(super) fn execute_command(&mut self, command: DeveloperCommand) {
         match command {
-            DeveloperCommand::Quit => self.should_quit = true,
+            DeveloperCommand::Quit => self.request_quit(),
             DeveloperCommand::Help => self.overlay = Some(Overlay::Help),
             DeveloperCommand::ShowLog => self.overlay = Some(Overlay::Log),
             DeveloperCommand::ShowStatistics => self.show_statistics(),
@@ -35,16 +35,28 @@ impl App {
                     severity: Severity::Info,
                 }));
             }
-            DeveloperCommand::SaveConfig => {
-                self.sync_config_from_state();
-                match self.services.config_store.save(&self.config) {
-                    Ok(()) => self.show_status(
-                        format!("configuration written to {}", self.services.config_store.path().display()),
-                        Severity::Success,
-                    ),
-                    Err(error) => {
-                        self.show_status(format!("could not save configuration: {error}"), Severity::Error)
-                    }
+            DeveloperCommand::SaveConfig => self.save_settings(),
+            DeveloperCommand::EditConfig => self.pending_foreground = Some(PendingAction::EditConfigFile),
+            DeveloperCommand::ReloadConfig => self.reload_config_from_disk(),
+            DeveloperCommand::Settings => self.overlay = Some(Overlay::Settings),
+            DeveloperCommand::Theme(None) => {
+                let mut lines = self.theme_listing();
+                lines.push(String::new());
+                lines.push(
+                    ":theme <name> switches · [theme] in the config file overrides single colours".to_owned(),
+                );
+                self.overlay = Some(Overlay::Message(MessageDialog {
+                    title: "Themes".to_owned(),
+                    lines,
+                    severity: Severity::Info,
+                }));
+            }
+            DeveloperCommand::Theme(Some(name)) => {
+                if self.apply_theme_name(&name) {
+                    self.show_status(
+                        format!("theme: {} (s in Settings saves it)", self.theme_name),
+                        Severity::Info,
+                    );
                 }
             }
             DeveloperCommand::GoTo(path) => {
@@ -169,7 +181,9 @@ impl App {
         }
     }
 
-    fn sync_config_from_state(&mut self) {
+    pub(super) fn sync_config_from_state(&mut self) {
+        self.config.view.theme = self.theme_name.clone();
+        self.config.view.show_files = self.explorer.show_files;
         self.config.view.row_limit = self.explorer.row_limit;
         self.config.view.heaviest_files_limit = self.heaviest.limit;
         self.config.view.size_mode = self.services.coordinator.size_mode().label().to_owned();

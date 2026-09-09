@@ -9,6 +9,8 @@ pub mod heaviest_state;
 pub mod marks;
 pub mod operation;
 pub mod rows;
+pub mod settings;
+pub mod settings_state;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -26,6 +28,7 @@ use self::explorer_state::{ExplorerState, RowBadge, RowKey};
 use self::heaviest_state::HeaviestState;
 use self::marks::{MarkedItem, Marks};
 use self::operation::{OperationKind, OperationReport, OperationRun, OperationSource};
+use self::settings_state::SettingsState;
 use crate::application::cleaning::CleaningService;
 use crate::application::configuration::AppConfig;
 use crate::application::deletion::DeletionService;
@@ -97,6 +100,10 @@ pub struct App {
     pub services: Services,
     pub config: AppConfig,
     pub theme: Theme,
+    /// Name of the built-in palette in use (`claude`, `nord`, ...).
+    pub theme_name: String,
+    /// Whether the terminal can show 24-bit colours; otherwise `basic` is forced.
+    pub truecolor: bool,
     pub size_base: SizeBase,
     pub deletion_mode: DeletionMode,
     pub screen: Screen,
@@ -107,11 +114,13 @@ pub struct App {
     pub explorer: ExplorerState,
     pub heaviest: HeaviestState,
     pub cleaner: CleanerState,
+    pub settings: SettingsState,
     pub marks: Marks,
     /// A deletion or cleaning run being followed in the progress modal. While it is set,
     /// every key except Ctrl+C goes to the modal, so nothing can race with the run.
     pub operation: Option<OperationRun>,
-    pub pending_elevation: Option<PendingAction>,
+    /// Work that needs the real terminal (sudo, an editor); run between frames.
+    pub pending_foreground: Option<PendingAction>,
     pub status: Option<StatusMessage>,
     pub tick: usize,
     pub should_quit: bool,
@@ -120,10 +129,12 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(services: Services, config: AppConfig, theme: Theme, start_path: Option<PathBuf>) -> Self {
+    pub fn new(services: Services, config: AppConfig, truecolor: bool, start_path: Option<PathBuf>) -> Self {
         let volumes = services.volumes.volumes();
         let row_limit = config.view.row_limit.max(5);
         let heaviest_limit = config.view.heaviest_files_limit.max(5);
+        let (theme_name, theme, theme_warning) = Self::resolve_theme(&config, truecolor);
+        let show_files = config.view.show_files;
         let mut app = Self {
             size_base: config.size_base(),
             deletion_mode: config.deletion_mode(),
@@ -131,6 +142,8 @@ impl App {
             services,
             config,
             theme,
+            theme_name,
+            truecolor,
             screen: Screen::Dashboard,
             overlay: None,
             command_line: CommandLineState::default(),
@@ -139,14 +152,19 @@ impl App {
             explorer: ExplorerState::new(row_limit),
             heaviest: HeaviestState::new(heaviest_limit),
             cleaner: CleanerState::default(),
+            settings: SettingsState::new(),
             marks: Marks::default(),
             operation: None,
-            pending_elevation: None,
+            pending_foreground: None,
             status: None,
             tick: 0,
             should_quit: false,
             started_at: Instant::now(),
         };
+        app.explorer.show_files = show_files;
+        if let Some(warning) = theme_warning {
+            app.show_status(warning, Severity::Warning);
+        }
         app.bootstrap_scans(start_path);
         app
     }
@@ -199,8 +217,9 @@ impl App {
                     break;
                 }
             }
-            if let Some(action) = self.pending_elevation.take() {
-                let outcome = session.suspend(|| self.run_elevation(action))?;
+            if let Some(action) = self.pending_foreground.take() {
+                let pause = !matches!(action, PendingAction::EditConfigFile);
+                let outcome = session.suspend_with_pause(pause, || self.run_foreground(action))?;
                 self.show_status(outcome.0, outcome.1);
             }
             self.tick();
@@ -246,6 +265,10 @@ impl App {
             self.handle_operation_key(key);
             return;
         }
+        if matches!(self.overlay, Some(Overlay::Settings)) {
+            self.handle_settings_key(key);
+            return;
+        }
         if self.overlay.is_some() {
             self.handle_overlay_key(key);
             return;
@@ -284,6 +307,8 @@ impl App {
             return;
         };
         match overlay {
+            // Routed to `handle_settings_key` before we get here; keep it open regardless.
+            Overlay::Settings => self.overlay = Some(Overlay::Settings),
             Overlay::Help | Overlay::Log | Overlay::Message(_) => {
                 // Any key dismisses.
             }
@@ -297,9 +322,14 @@ impl App {
                     }
                 }
                 KeyCode::Char('y') | KeyCode::Char('Y')
-                    if matches!(dialog.confirmation, Confirmation::YesKey) =>
+                    if matches!(dialog.confirmation, Confirmation::YesKey | Confirmation::SaveOrDiscard) =>
                 {
                     self.perform(dialog.action);
+                }
+                KeyCode::Char('n') | KeyCode::Char('N')
+                    if matches!(dialog.confirmation, Confirmation::SaveOrDiscard) =>
+                {
+                    self.should_quit = true;
                 }
                 KeyCode::Char('n') | KeyCode::Char('N')
                     if matches!(dialog.confirmation, Confirmation::YesKey) =>
@@ -903,8 +933,29 @@ impl App {
         }));
     }
 
-    fn request_quit(&mut self) {
-        self.should_quit = true;
+    /// Leaves at once, unless preferences were changed and not written.
+    pub(super) fn request_quit(&mut self) {
+        if !self.settings.dirty {
+            self.should_quit = true;
+            return;
+        }
+        let path = formatting::fit(
+            &formatting::home_relative(self.services.config_store.path(), self.services.home.as_deref()),
+            70,
+            true,
+        );
+        self.overlay = Some(Overlay::Confirm(ConfirmDialog {
+            title: "Unsaved preferences".to_owned(),
+            lines: vec![
+                "Preferences changed in this session were not written to".to_owned(),
+                path,
+                String::new(),
+                "y saves and quits · n quits without saving · Esc stays".to_owned(),
+            ],
+            confirmation: Confirmation::SaveOrDiscard,
+            action: PendingAction::SaveAndQuit,
+            dangerous: false,
+        }));
     }
 
     fn perform(&mut self, action: PendingAction) {
@@ -912,8 +963,15 @@ impl App {
             PendingAction::Delete(plan) => self.start_deletion(plan),
             PendingAction::Clean(plan) => self.start_cleaning(plan),
             PendingAction::Quit => self.should_quit = true,
-            elevation @ (PendingAction::ElevateDelete(_) | PendingAction::ElevateClean { .. }) => {
-                self.pending_elevation = Some(elevation);
+            PendingAction::SaveAndQuit => {
+                self.save_settings();
+                self.should_quit = true;
+            }
+            PendingAction::ResetSettings => self.reset_settings_to_defaults(),
+            foreground @ (PendingAction::ElevateDelete(_)
+            | PendingAction::ElevateClean { .. }
+            | PendingAction::EditConfigFile) => {
+                self.pending_foreground = Some(foreground);
             }
         }
     }
@@ -1139,8 +1197,9 @@ impl App {
     }
 
     /// Runs with the terminal handed back to the user. Returns a status line.
-    fn run_elevation(&mut self, action: PendingAction) -> (String, Severity) {
+    fn run_foreground(&mut self, action: PendingAction) -> (String, Severity) {
         match action {
+            PendingAction::EditConfigFile => self.edit_config_file_in_editor(),
             PendingAction::ElevateDelete(items) => {
                 let paths: Vec<PathBuf> = items.iter().map(|item| item.path.clone()).collect();
                 match self.services.escalator.remove_paths(&paths) {

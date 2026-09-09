@@ -3,5 +3,5 @@
 pub mod app_config;
 
 pub use app_config::{
-    AppConfig, CleanerConfig, DeletionConfig, DockerConfig, ScanConfig, ViewConfig, expand_tilde,
+    AppConfig, CleanerConfig, DeletionConfig, DockerConfig, ScanConfig, ThemeConfig, ViewConfig, expand_tilde,
 };

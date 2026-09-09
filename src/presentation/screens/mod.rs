@@ -6,13 +6,14 @@ mod explorer;
 mod heaviest;
 mod operation;
 mod overlays;
+mod settings;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 
-use crate::presentation::app::dialogs::Severity;
+use crate::presentation::app::dialogs::{Overlay, Severity};
 use crate::presentation::app::{App, Screen, VERSION};
 use crate::presentation::formatting;
 use crate::presentation::widgets::chrome;
@@ -44,7 +45,9 @@ impl App {
             Screen::Cleaner => self.render_cleaner(frame, content_area),
         }
         self.render_footer(frame, footer_area);
-        if let Some(overlay) = self.overlay.clone() {
+        if matches!(self.overlay, Some(Overlay::Settings)) {
+            self.render_settings_overlay(frame);
+        } else if let Some(overlay) = self.overlay.clone() {
             self.render_overlay(frame, &overlay);
         }
         if let Some(run) = &self.operation {
@@ -153,6 +156,19 @@ impl App {
                 ])),
                 area,
             );
+            return;
+        }
+        if matches!(self.overlay, Some(Overlay::Settings)) {
+            let hints: &[(&str, &str)] = &[
+                ("↑↓", "select"),
+                ("←→ ⏎", "change"),
+                ("s", "save"),
+                ("e", "edit file"),
+                ("R", "reset defaults"),
+                (":theme", "palette"),
+                ("esc", "close"),
+            ];
+            frame.render_widget(Paragraph::new(chrome::key_hints(&theme, hints)), area);
             return;
         }
         let hints: &[(&str, &str)] = match self.screen {
