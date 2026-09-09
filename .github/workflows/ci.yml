@@ -62,7 +62,12 @@ jobs:
       - name: Dry run, and fail unless the notes were rendered
         run: |
           set -euo pipefail
-          npx semantic-release --dry-run --no-ci --branches "${{ github.head_ref }}" | tee dry-run.log
+          # env-ci derives the branch from GITHUB_REF, which a pull request sets to
+          # refs/pull/N/merge; semantic-release would then skip the run without analysing
+          # anything. The variable is set on the command (the runner reserves GITHUB_* in
+          # `env:` blocks) so the dry run really reaches analyzeCommits and generateNotes.
+          GITHUB_REF="refs/heads/${{ github.head_ref }}" \
+            npx semantic-release --dry-run --no-ci --branches "${{ github.head_ref }}" | tee dry-run.log
           if grep -q "There are no relevant changes" dry-run.log; then
             echo "No releasable commit on this branch; notes were not exercised."
             exit 0
@@ -70,10 +75,6 @@ jobs:
           grep -q "Release note for version" dry-run.log
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # env-ci derives the branch from GITHUB_REF, which for a pull request is
-          # refs/pull/N/merge; semantic-release would then skip the run. Point it at the
-          # branch so the analysis and the notes actually happen.
-          GITHUB_REF: refs/heads/${{ github.head_ref }}
 
   # Semantic release: reads the Conventional Commits since the last tag, decides the next
   # version (feat → minor, fix/perf → patch, "!" or BREAKING CHANGE → major), updates
