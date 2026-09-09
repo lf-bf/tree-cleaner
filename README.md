@@ -26,15 +26,23 @@ environments, Cargo targets, caches).
 
 ### Homebrew (macOS and Linux)
 
+Since version 6, Homebrew refuses to load formulae from a tap it does not trust, and the
+`brew tap` step itself fails with `invalid syntax in tap!` until the trust is granted. So
+the first install takes three commands, in this order:
+
 ```bash
+brew trust --formula lf-bf/tree-cleaner/tree-cleaner
 brew tap lf-bf/tree-cleaner https://github.com/lf-bf/tree-cleaner.git
 brew install tree-cleaner
 ```
 
-That installs the prebuilt binary of the latest release (macOS on Apple silicon or Intel,
-Linux on x86_64) in a second or two, without building anything. Later versions arrive with
-`brew update && brew upgrade tree-cleaner`. The tap URL is needed because the formula lives
-in this repository rather than in a `homebrew-tap` one.
+The first command trusts only this formula, not the whole tap (`brew untrust` reverts it,
+`brew trust` lists what is trusted). The tap URL is needed because the formula lives in
+this repository rather than in a `homebrew-tap` one.
+
+The install itself downloads the prebuilt binary of the latest release (macOS on Apple
+silicon or Intel, Linux on x86_64) and finishes in a second or two, without building
+anything. Later versions arrive with `brew update && brew upgrade tree-cleaner`.
 
 On a platform without a published binary, build from source with
 `brew install --HEAD lf-bf/tree-cleaner/tree-cleaner` (needs the `rust` formula) or with
