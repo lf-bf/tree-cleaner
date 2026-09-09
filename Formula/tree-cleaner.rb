@@ -12,7 +12,7 @@
 class TreeCleaner < Formula
   desc "Interactive terminal explorer and cleaner for disk usage"
   homepage "https://github.com/lf-bf/tree-cleaner"
-  url "ssh://git@github.com/lf-bf/tree-cleaner.git", tag: "v0.2.0"
+  url "ssh://git@github.com/lf-bf/tree-cleaner.git", tag: "v0.3.0"
   license "MIT"
   head "ssh://git@github.com/lf-bf/tree-cleaner.git", branch: "main"
 
