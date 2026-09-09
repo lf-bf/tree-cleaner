@@ -156,3 +156,35 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.release.outputs.version }}
         run: gh release upload "v${VERSION}" dist/* --clobber
+
+  # The Homebrew formula installs the prebuilt binaries, so it can only be written once
+  # they are published and their checksums exist. It lands as its own commit on main.
+  formula:
+    name: point the Homebrew formula at the release
+    needs: [release, binaries]
+    if: needs.release.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Regenerate the formula
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/release/update-formula.sh "${{ needs.release.outputs.version }}"
+      - name: Commit it
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- Formula/tree-cleaner.rb; then
+            echo "The formula already points at v${VERSION}."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/tree-cleaner.rb
+          git commit -m "chore(release): point the Homebrew formula at v${VERSION} [skip ci]"
+          git push

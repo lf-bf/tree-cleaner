@@ -26,18 +26,19 @@ environments, Cargo targets, caches).
 
 ### Homebrew (macOS and Linux)
 
-The repository is private, so the tap is added by URL and the formula builds the tagged
-release from source over SSH (your GitHub SSH key must work):
-
 ```bash
-brew tap lf-bf/tree-cleaner ssh://git@github.com/lf-bf/tree-cleaner.git
-brew install lf-bf/tree-cleaner/tree-cleaner
+brew tap lf-bf/tree-cleaner https://github.com/lf-bf/tree-cleaner.git
+brew install tree-cleaner
 ```
 
-Later releases arrive with the usual `brew update && brew upgrade tree-cleaner`; the
-formula's `tag`/`version` are bumped automatically by every release (see
-[Releases](#releases)). `brew install --HEAD lf-bf/tree-cleaner/tree-cleaner` builds the
-tip of `main` instead.
+That installs the prebuilt binary of the latest release (macOS on Apple silicon or Intel,
+Linux on x86_64) in a second or two, without building anything. Later versions arrive with
+`brew update && brew upgrade tree-cleaner`. The tap URL is needed because the formula lives
+in this repository rather than in a `homebrew-tap` one.
+
+On a platform without a published binary, build from source with
+`brew install --HEAD lf-bf/tree-cleaner/tree-cleaner` (needs the `rust` formula) or with
+Cargo below.
 
 ### Cargo
 
@@ -46,9 +47,10 @@ cargo install --path .
 ```
 
 Requires Rust 1.85 or newer to build. Runs on macOS and Linux, in any terminal
-(truecolor when available, 16 colours otherwise, `NO_COLOR` respected). Prebuilt binaries
-for macOS (Apple silicon and Intel) and Linux x86_64 are attached to every
-[GitHub release](https://github.com/lf-bf/tree-cleaner/releases).
+(truecolor when available, 16 colours otherwise, `NO_COLOR` respected). The binaries the
+formula downloads are attached to every
+[GitHub release](https://github.com/lf-bf/tree-cleaner/releases), so they can also be
+fetched by hand.
 
 ## Use
 
@@ -242,9 +244,10 @@ preset or changelog template fails there instead of after the merge. The changel
 semantic-release 25. Version `10` moved to a new template engine that needs `writer@9`,
 which fails at the point where the notes are rendered.
 
-To make the tap installable without SSH access (a public tap with bottles or binary
-formulae), the release job would need a token able to push to a public `homebrew-tap`
-repository; the pieces (tarballs and `.sha256` files per target) are already produced.
+After the binaries are attached, a last job regenerates `Formula/tree-cleaner.rb` from the
+release checksums (`scripts/release/update-formula.sh`) and commits it as
+`chore(release): point the Homebrew formula at vX.Y.Z [skip ci]`. The formula therefore
+always installs the newest published binaries, and no checksum is ever written by hand.
 
 ## License
 
